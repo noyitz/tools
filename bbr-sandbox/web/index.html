@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BBR Plugin Sandbox</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Top bar -->
+  <header class="top-bar">
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <h1>BBR Plugin Sandbox</h1>
+    </div>
+  </header>
+
+  <div class="app-layout">
+  <!-- Sidebar nav -->
+  <nav class="sidebar">
+    <button class="sidebar-tab active" data-tab="environment">
+      <span class="sidebar-icon">&#127760;</span>
+      <span class="sidebar-label">Environment</span>
+    </button>
+    <button class="sidebar-tab" data-tab="sandbox">
+      <span class="sidebar-icon">&#9881;</span>
+      <span class="sidebar-label">Sandbox</span>
+    </button>
+  </nav>
+
+  <div class="tab-panels">
+
+  <!-- ==================== ENVIRONMENT TAB ==================== -->
+  <div id="tab-environment" class="tab-content active">
+    <div class="env-grid">
+
+      <!-- Architecture Diagram -->
+      <div class="card card-wide">
+        <div class="card-header">
+          <h2>How It Works</h2>
+        </div>
+        <div class="card-body">
+          <div class="arch-diagram">
+            <!-- Local machine -->
+            <div class="arch-zone arch-local">
+              <div class="arch-zone-label">Your Machine</div>
+              <div class="arch-node arch-active" id="dia-browser">
+                <div class="arch-icon">&#127760;</div>
+                <div class="arch-name">Browser</div>
+                <div class="arch-detail">Web UI</div>
+              </div>
+              <div class="arch-arrow arch-active">&#8594; <span class="arch-proto">HTTP</span></div>
+              <div class="arch-node arch-active" id="dia-backend">
+                <div class="arch-icon">&#9881;</div>
+                <div class="arch-name">Go Backend</div>
+                <div class="arch-detail">Envoy Simulator</div>
+              </div>
+              <div class="arch-arrow" id="dia-pf-arrow">&#8594; <span class="arch-proto">gRPC</span></div>
+              <div class="arch-node" id="dia-portforward">
+                <div class="arch-icon">&#128268;</div>
+                <div class="arch-name">Port Forward</div>
+                <div class="arch-detail" id="dia-pf-detail">not running</div>
+              </div>
+            </div>
+
+            <!-- Tunnel arrow -->
+            <div class="arch-tunnel" id="dia-tunnel">
+              <div class="arch-tunnel-line"></div>
+              <div class="arch-tunnel-label">oc port-forward :9004</div>
+            </div>
+
+            <!-- Cluster -->
+            <div class="arch-zone arch-cluster" id="dia-cluster-zone">
+              <div class="arch-zone-label" id="dia-cluster-label">Cluster (not connected)</div>
+              <div class="arch-node" id="dia-bbr">
+                <div class="arch-icon">&#128230;</div>
+                <div class="arch-name">BBR Pod</div>
+                <div class="arch-detail" id="dia-bbr-detail">unknown</div>
+              </div>
+              <div class="arch-arrow" id="dia-plugin-arrow">&#8594; <span class="arch-proto">plugins</span></div>
+              <div class="arch-node" id="dia-plugins">
+                <div class="arch-icon">&#128295;</div>
+                <div class="arch-name">Plugin Chain</div>
+                <div class="arch-detail" id="dia-plugins-detail">--</div>
+              </div>
+            </div>
+          </div>
+          <div id="dia-action-hint" class="arch-action-hint" style="display:none"></div>
+        </div>
+      </div>
+
+      <!-- Cluster Connection -->
+      <div class="card card-wide">
+        <div class="card-header">
+          <h2>Cluster Connection</h2>
+          <button id="refresh-cluster" class="btn btn-small" title="Refresh cluster info">&#8635; Refresh</button>
+        </div>
+        <div id="cluster-connection" class="card-body">
+          <!-- Login form (shown when disconnected) -->
+          <div id="cluster-login-form">
+            <div class="form-row">
+              <label>API Server</label>
+              <input type="text" id="cluster-server" class="form-input" placeholder="https://api.cluster.example.com:6443">
+            </div>
+            <div class="form-row-group">
+              <div class="form-row">
+                <label>Username</label>
+                <input type="text" id="cluster-user" class="form-input" placeholder="admin">
+              </div>
+              <div class="form-row">
+                <label>Password</label>
+                <input type="password" id="cluster-pass" class="form-input" placeholder="password">
+              </div>
+            </div>
+            <div class="form-row">
+              <label>BBR Namespace</label>
+              <input type="text" id="cluster-namespace" class="form-input" value="bbr-plugins" placeholder="bbr-plugins">
+            </div>
+            <div class="form-actions">
+              <button id="cluster-login-btn" class="btn btn-primary">Login to Cluster</button>
+            </div>
+            <div id="cluster-login-error" class="error-msg"></div>
+          </div>
+
+          <!-- Connected view (shown when connected) -->
+          <div id="cluster-connected-view" style="display:none">
+            <div id="cluster-info"></div>
+            <div class="form-actions" style="margin-top:12px">
+              <button id="cluster-logout-btn" class="btn btn-danger">Disconnect</button>
+              <span class="env-note" style="margin-left:8px">Switch to a different cluster</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BBR Deployment (only shown when connected) -->
+      <div id="bbr-section" style="display:none">
+
+      <!-- BBR Deployment -->
+      <div class="card">
+        <div class="card-header">
+          <h2>BBR Deployment</h2>
+        </div>
+        <div id="bbr-info" class="card-body">
+          <div class="loading">Loading...</div>
+        </div>
+      </div>
+
+      <!-- Plugins -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Active Plugins</h2>
+        </div>
+        <div id="plugins-info" class="card-body">
+          <div class="loading">Loading...</div>
+        </div>
+      </div>
+
+      </div><!-- /bbr-section -->
+    </div>
+  </div>
+
+  <!-- ==================== SANDBOX TAB ==================== -->
+  <div id="tab-sandbox" class="tab-content">
+    <!-- Connection bar -->
+    <div class="connection-bar">
+      <div class="connection">
+        <span id="status-indicator" class="status disconnected">Not connected - set up environment first</span>
+      </div>
+      <div class="phase-toggle">
+        <button id="phase-request" class="btn btn-phase active" data-phase="request">Request</button>
+        <button id="phase-response" class="btn btn-phase" data-phase="response">Response</button>
+      </div>
+    </div>
+
+    <!-- Presets -->
+    <div class="presets-bar">
+      <span class="presets-label">Samples:</span>
+      <div class="presets" id="presets-container"></div>
+    </div>
+
+    <!-- Main panels -->
+    <main class="panels">
+      <div class="panel">
+        <h2>Input</h2>
+        <div class="section">
+          <h3>Headers</h3>
+          <div id="input-headers" class="headers-editor"></div>
+          <button id="add-header-btn" class="btn btn-small">+ Add Header</button>
+        </div>
+        <div class="section">
+          <h3>Body <button id="prettify-btn" class="btn btn-tiny">Format</button></h3>
+          <textarea id="input-body" class="json-editor" spellcheck="false" placeholder='{"model": "gpt-4o", "messages": [...]}'></textarea>
+          <div id="body-error" class="error-msg"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Result</h2>
+        <div class="section">
+          <h3>Header Mutations</h3>
+          <div id="result-headers" class="result-headers">
+            <div class="placeholder">Send a request to see results</div>
+          </div>
+        </div>
+        <div class="section">
+          <h3>Body <span id="body-status" class="body-status"></span></h3>
+          <div id="result-body" class="result-body">
+            <div class="placeholder">Send a request to see results</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Send button -->
+    <div class="send-bar">
+      <button id="send-btn" class="btn btn-send" disabled>Send to BBR</button>
+      <span id="duration" class="duration"></span>
+    </div>
+  </div>
+  </div><!-- /tab-panels -->
+  </div><!-- /app-layout -->
+
+  <script src="js/headers.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/diff.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

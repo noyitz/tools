@@ -1,0 +1,11 @@
+# Binaries
+bbr-sandbox/bbr-sandbox
+*.exe
+
+# Go
+bbr-sandbox/go.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
