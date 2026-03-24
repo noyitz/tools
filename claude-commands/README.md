@@ -10,6 +10,13 @@ Parallel deep-dive into all repos in the AI Gateway ecosystem. Launches one agen
 
 **Repos covered:** MaaS, Kuadrant, Limitador, Authorino, Gateway API Inference Extension, AI Gateway Payload Processing, Tools
 
+**Fork & clone management (runs first):**
+- Detects if you have a fork of each selected repo on GitHub
+- Checks if a local clone exists in your working directory
+- Syncs forks that are behind upstream (`gh repo sync`)
+- Offers to fork-and-clone, or clone upstream directly for repos you don't have locally
+- Presents all repos in a single summary table so you decide once, not per-repo
+
 **What each agent collects per repo:**
 - Repo structure, README, docs, and AI/contributor guidance (CLAUDE.md, CONTRIBUTING.md)
 - CRDs, API types, and key interfaces/extension points
@@ -22,6 +29,7 @@ Parallel deep-dive into all repos in the AI Gateway ecosystem. Launches one agen
 
 **Cross-repo synthesis:**
 - Summary table (purpose, language, activity, latest release)
+- Local clone status (path, branch, fork vs upstream, sync status)
 - Dependency graph showing which repos import from which
 - CRDs and API types that serve as integration contracts
 - Cross-cutting PRs/issues that reference or affect other repos

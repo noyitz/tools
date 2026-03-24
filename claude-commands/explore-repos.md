@@ -13,7 +13,32 @@ After the user selects repos, ask them: **"Run exploration in the background (yo
 For EACH selected repo do the following deep-dive (use the Agent tool to parallelize across repos). Set `run_in_background: true` on each Agent call if the user chose "background", or `run_in_background: false` (default) if they chose "hold":
 
 ### For each repo:
-1. **Clone/fetch info via GitHub API**: Use `gh` CLI to get repo description, languages, and directory structure
+
+#### Step 0 — Local clone & fork sync
+For each repo (upstream = `<owner>/<repo>`), determine the repo name from the URL (last path segment without `.git`):
+
+1. **Get the authenticated GitHub user**: Run `gh api user --jq '.login'` to get the current user's GitHub username.
+
+2. **Check for an existing fork**: Run `gh api repos/<current-user>/<repo-name> --jq '.fork' 2>/dev/null`. If this returns `true`, the user has a fork.
+
+3. **Check for an existing local clone**: Look for a directory matching the repo name under the current working directory (e.g., `./<repo-name>/`). Check if it exists and is a git repo.
+
+4. **Based on the results, present the situation and ask the user** (collect all repos into a single prompt before asking):
+
+   - **Has fork + has local clone**: Report status. Check if the fork is behind upstream with `gh api repos/<current-user>/<repo-name> --jq '.parent.full_name'` and compare default branch HEADs. If behind, ask: *"Your fork of <repo> is behind upstream. Sync it?"* If yes, run `gh repo sync <current-user>/<repo-name>` and then `git -C ./<repo-name> pull`.
+
+   - **Has fork + no local clone**: Ask: *"You have a fork of <repo> but no local clone. Clone your fork?"* If yes, run `gh repo clone <current-user>/<repo-name>` which sets up both origin (fork) and upstream automatically.
+
+   - **No fork + has local clone**: Check the remote URL to see if it points to upstream or a fork. Report status. Ask if they want to create a fork with `gh repo fork <owner>/<repo> --remote=true` (this adds the fork as a remote).
+
+   - **No fork + no local clone**: Ask: *"No fork or local clone of <repo>. Fork and clone, or clone upstream directly?"* If fork: `gh repo fork <owner>/<repo> --clone=true`. If upstream only: `gh repo clone <owner>/<repo>`.
+
+5. **After cloning/syncing**, ensure the local default branch is up to date: `git -C ./<repo-name> fetch --all && git -C ./<repo-name> pull --ff-only` (if on the default branch).
+
+**Important**: Collect the fork/clone status for ALL selected repos first, then present them to the user in a single summary table and ask for decisions all at once (rather than one repo at a time). This avoids excessive back-and-forth.
+
+#### Step 1-13 — Deep-dive exploration (runs after clone/sync is complete)
+1. **Repo info via GitHub API**: Use `gh` CLI to get repo description, languages, and directory structure
 2. **Architecture & Structure**: Use `gh api` to explore the repo tree, identify key directories, entry points, config files, and understand the project layout
 3. **README & Docs**: Fetch and read the README and any docs/ directory to understand purpose, setup, and architecture
 4. **AI/Contributor Guidance**: Fetch CLAUDE.md, AGENTS.md, or CONTRIBUTING.md if they exist — these contain repo-specific conventions, test commands, and architectural constraints
@@ -29,6 +54,7 @@ For EACH selected repo do the following deep-dive (use the Agent tool to paralle
 
 ### After exploring all selected repos, provide:
 - A summary table comparing the repos (purpose, language, activity level, latest release)
+- Local clone status for each repo (path, branch, fork vs upstream, sync status)
 - A dependency graph showing which repos import from which
 - Key CRDs and API types that serve as integration contracts between repos
 - Key architectural patterns and how the repos relate to each other
