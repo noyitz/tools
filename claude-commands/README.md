@@ -6,16 +6,25 @@ Custom slash commands for [Claude Code](https://docs.anthropic.com/en/docs/claud
 
 ### `/explore-repos`
 
-Parallel deep-dive into all repos in the AI Gateway ecosystem. Launches one agent per repo to pull architecture, recent PRs, open issues, and code patterns via the GitHub CLI, then synthesizes a cross-repo summary with integration points.
+Parallel deep-dive into all repos in the AI Gateway ecosystem. Launches one agent per repo to pull everything relevant via the GitHub CLI, then synthesizes a cross-repo summary.
 
 **Repos covered:** MaaS, Kuadrant, Limitador, Authorino, Gateway API Inference Extension, AI Gateway Payload Processing, Tools
 
-**What it does:**
-- Fetches repo structure, README, and docs
-- Reviews the 10 most recent PRs and open issues
-- Identifies key code patterns and frameworks
-- Produces a comparison table and architecture diagram showing how repos relate
-- Runs all repos in parallel (one agent each)
+**What each agent collects per repo:**
+- Repo structure, README, docs, and AI/contributor guidance (CLAUDE.md, CONTRIBUTING.md)
+- CRDs, API types, and key interfaces/extension points
+- Cross-repo dependency graph (from go.mod / Cargo.toml)
+- Last 20 PRs with review comments on the most active ones
+- Open issues (15 per repo)
+- Latest releases and branch strategy
+- Build & test targets (Makefile / CI workflows)
+- Key code patterns and frameworks
+
+**Cross-repo synthesis:**
+- Summary table (purpose, language, activity, latest release)
+- Dependency graph showing which repos import from which
+- CRDs and API types that serve as integration contracts
+- Cross-cutting PRs/issues that reference or affect other repos
 
 **Options:**
 - Select specific repos (e.g. "1,3,5") or "all"
