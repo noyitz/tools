@@ -10,6 +10,26 @@ external model support with BBR (Body-Based Router) payload processing plugins.
 - At least one internal model (LLMInferenceService) deployed
 - An external AI simulator or real provider endpoint (see [llm-katan](https://github.com/yossiovadia/llm-katan) by @yossiovadia — a drop-in test server that supports OpenAI, Anthropic, Bedrock, and Vertex APIs with real inference, no API keys or GPU needed)
 
+## Required PRs
+
+Before building, ensure these PRs are merged or included in your branches:
+
+### models-as-a-service
+
+| PR | Title | Status | Purpose |
+|----|-------|--------|---------|
+| [#571](https://github.com/opendatahub-io/models-as-a-service/pull/571) | ExternalModel CRD fields | Merged | Adds provider, endpoint, credentialRef to MaaSModelRef |
+| [#582](https://github.com/opendatahub-io/models-as-a-service/pull/582) | ExternalModel Istio reconciler | Open | Auto-creates Istio egress resources |
+| [#586](https://github.com/opendatahub-io/models-as-a-service/pull/586) | Refactor into ExternalModel CRD | Merged | Separate ExternalModel CR with provider config |
+| [#616](https://github.com/opendatahub-io/models-as-a-service/pull/616) | Fix auth subscription field | Open | Fixes 403 caused by removed apiKeyValidation.subscription |
+
+### ai-gateway-payload-processing
+
+| PR | Title | Status | Purpose |
+|----|-------|--------|---------|
+| [#47](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/47) | apikey-injection skip for internal models | Open | Fixes BBR crash on internal models |
+| [#52](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/52) | ExternalModel CRD support | Open | provider-resolver reads from ExternalModel CR |
+
 ## Overview
 
 ```
@@ -42,14 +62,14 @@ external model support with BBR (Body-Based Router) payload processing plugins.
 
 ## Step 1 — Build and Deploy the Custom MaaS Controller
 
-The custom MaaS controller includes PR #582 (ExternalModel reconciler) and
-PR #571 (ExternalModel CRD fields).
-
 ```bash
-# From the models-as-a-service repo, build the custom controller image
 cd models-as-a-service
 
-# Start a binary build (requires an existing BuildConfig)
+# Apply the ExternalModel CRD
+oc apply -f deployment/base/maas-controller/crd/bases/maas.opendatahub.io_externalmodels.yaml
+oc apply -f deployment/base/maas-controller/crd/bases/maas.opendatahub.io_maasmodelrefs.yaml
+
+# Build the custom controller image
 oc start-build maas-controller-custom --from-dir=maas-controller/ \
   -n redhat-ods-applications --follow
 
@@ -58,28 +78,22 @@ oc set image deployment/maas-controller \
   manager=image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/maas-controller-custom:latest \
   -n redhat-ods-applications
 
-# Restart to pick up the new image
+# Restart and apply RBAC
 oc rollout restart deployment/maas-controller -n redhat-ods-applications
 oc rollout status deployment/maas-controller -n redhat-ods-applications --timeout=120s
-
-# Apply the updated RBAC (needed for Istio resources)
 oc apply -f deployment/base/maas-controller/rbac/clusterrole.yaml
 ```
 
 ## Step 2 — Build and Deploy the BBR Plugins
 
-The BBR pod runs the payload processing plugins: `body-field-to-header`,
-`provider-resolver`, `api-translation`, and `apikey-injection`.
-
 ```bash
-# From the ai-gateway-payload-processing repo
 cd ai-gateway-payload-processing
 
-# Build and push (requires an existing BuildConfig)
+# Build and push
 oc start-build bbr-plugins --from-dir=. \
   -n redhat-ods-applications --follow
 
-# Restart to pick up the new image
+# Restart
 oc rollout restart deployment/bbr-plugins -n redhat-ods-applications
 oc rollout status deployment/bbr-plugins -n redhat-ods-applications --timeout=60s
 ```
@@ -92,6 +106,24 @@ args:
   - --plugin=model-provider-resolver:default
   - --plugin=api-translation:default
   - --plugin=apikey-injection:default
+```
+
+**BBR RBAC** — needs access to both MaaSModelRef and ExternalModel CRDs:
+
+```bash
+oc apply -f - <<'EOF'
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bbr-maasmodelref-reader
+rules:
+- apiGroups: ["maas.opendatahub.io"]
+  resources: ["maasmodelrefs"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["maas.opendatahub.io"]
+  resources: ["externalmodels"]
+  verbs: ["get", "list", "watch"]
+EOF
 ```
 
 ## Step 3 — Create the Simulator ServiceEntry
@@ -123,13 +155,10 @@ spec:
 EOF
 ```
 
-> **Note**: This is needed because ExternalName services require a hostname,
-> not an IP address. The ServiceEntry maps `ai-simulator.external` to the
-> simulator IP in the Istio mesh.
+> **Note**: ExternalName services require a hostname, not an IP address. The
+> ServiceEntry maps `ai-simulator.external` to the simulator IP in the mesh.
 
 ## Step 4 — Create the BBR EnvoyFilter
-
-The EnvoyFilter wires BBR as an ext_proc filter in the Envoy proxy.
 
 ```bash
 oc apply -f - <<'EOF'
@@ -209,8 +238,8 @@ EOF
 
 ## Step 5 — Add External Models
 
-For each external model, create: Secret → MaaSModelRef → simulator Service →
-maas-model HTTPRoute → add to auth policy + subscription.
+For each external model, create: Secret → ExternalModel CR → MaaSModelRef →
+simulator Service → maas-model HTTPRoute → add to auth policy + subscription.
 
 ### 5a. Create the Secret
 
@@ -222,7 +251,25 @@ oc label secret <provider>-api-key -n llm \
   inference.networking.k8s.io/bbr-managed=true
 ```
 
-### 5b. Create the MaaSModelRef
+### 5b. Create the ExternalModel CR
+
+```bash
+oc apply -f - <<'EOF'
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: <model-name>
+  namespace: llm
+spec:
+  provider: <provider>
+  endpoint: <provider-fqdn-or-ip>
+  credentialRef:
+    name: <provider>-api-key
+    namespace: llm
+EOF
+```
+
+### 5c. Create the MaaSModelRef
 
 ```bash
 oc apply -f - <<'EOF'
@@ -232,31 +279,26 @@ metadata:
   name: <model-name>
   namespace: llm
   annotations:
-    maas.opendatahub.io/endpoint: "<provider-ip-or-fqdn>"
+    maas.opendatahub.io/endpoint: "<provider-fqdn-or-ip>"
     maas.opendatahub.io/provider: "<provider>"
 spec:
-  credentialRef:
-    name: <provider>-api-key
-    namespace: llm
   modelRef:
-    name: <model-name>
     kind: ExternalModel
-    provider: <provider>
-    endpoint: <provider-ip-or-fqdn>
+    name: <model-name>
 EOF
 ```
+
+> **Note**: The annotations are used by the Istio reconciler (PR #582) until
+> it is updated to read from the ExternalModel CR directly.
 
 The reconciler auto-creates Service, ServiceEntry, DestinationRule, and
 HTTPRoute in `openshift-ingress`. Verify with:
 
 ```bash
 oc get maasmodelref <model-name> -n llm
-# Should show PHASE: Ready
 ```
 
-### 5c. Create Simulator Service (manual — until reconciler is updated)
-
-The `maas-model-*` HTTPRoute needs a backend service in the model namespace:
+### 5d. Create Simulator Service (manual — until reconciler is updated)
 
 ```bash
 oc apply -f - <<'EOF'
@@ -274,7 +316,7 @@ spec:
 EOF
 ```
 
-### 5d. Create maas-model HTTPRoute (manual — until reconciler is updated)
+### 5e. Create maas-model HTTPRoute (manual — until reconciler is updated)
 
 This HTTPRoute needs **both** match rules:
 - **Path-based**: So the Kuadrant Wasm plugin can enforce auth + rate limiting
@@ -318,7 +360,7 @@ spec:
 EOF
 ```
 
-### 5e. Add to Auth Policy and Subscription
+### 5f. Add to Auth Policy and Subscription
 
 ```bash
 # Add to MaaSAuthPolicy (include ALL existing models)
@@ -369,8 +411,51 @@ oc label secret azure-openai-api-key -n llm inference.networking.k8s.io/bbr-mana
 oc create secret generic vertex-api-key -n llm --from-literal=api-key=vtx-demo-3456
 oc label secret vertex-api-key -n llm inference.networking.k8s.io/bbr-managed=true
 
+# --- ExternalModel CRs ---
+oc apply -f - <<'EOF'
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: gpt-4o
+  namespace: llm
+spec:
+  provider: openai
+  endpoint: 3.150.113.9
+  credentialRef: {name: openai-api-key, namespace: llm}
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: claude-sonnet
+  namespace: llm
+spec:
+  provider: anthropic
+  endpoint: 3.150.113.9
+  credentialRef: {name: anthropic-api-key, namespace: llm}
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: gpt-4o-azure
+  namespace: llm
+spec:
+  provider: azure-openai
+  endpoint: 3.150.113.9
+  credentialRef: {name: azure-openai-api-key, namespace: llm}
+---
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: gemini-flash
+  namespace: llm
+spec:
+  provider: vertex
+  endpoint: 3.150.113.9
+  credentialRef: {name: vertex-api-key, namespace: llm}
+EOF
+
 # --- MaaSModelRefs ---
-cat > /tmp/external-models.yaml <<'EOF'
+oc apply -f - <<'EOF'
 apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSModelRef
 metadata:
@@ -380,8 +465,7 @@ metadata:
     maas.opendatahub.io/endpoint: "3.150.113.9"
     maas.opendatahub.io/provider: "openai"
 spec:
-  credentialRef: {name: openai-api-key, namespace: llm}
-  modelRef: {name: gpt-4o, kind: ExternalModel, provider: openai, endpoint: 3.150.113.9}
+  modelRef: {kind: ExternalModel, name: gpt-4o}
 ---
 apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSModelRef
@@ -392,8 +476,7 @@ metadata:
     maas.opendatahub.io/endpoint: "3.150.113.9"
     maas.opendatahub.io/provider: "anthropic"
 spec:
-  credentialRef: {name: anthropic-api-key, namespace: llm}
-  modelRef: {name: claude-sonnet, kind: ExternalModel, provider: anthropic, endpoint: 3.150.113.9}
+  modelRef: {kind: ExternalModel, name: claude-sonnet}
 ---
 apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSModelRef
@@ -404,8 +487,7 @@ metadata:
     maas.opendatahub.io/endpoint: "3.150.113.9"
     maas.opendatahub.io/provider: "azure-openai"
 spec:
-  credentialRef: {name: azure-openai-api-key, namespace: llm}
-  modelRef: {name: gpt-4o-azure, kind: ExternalModel, provider: azure-openai, endpoint: 3.150.113.9}
+  modelRef: {kind: ExternalModel, name: gpt-4o-azure}
 ---
 apiVersion: maas.opendatahub.io/v1alpha1
 kind: MaaSModelRef
@@ -416,15 +498,13 @@ metadata:
     maas.opendatahub.io/endpoint: "3.150.113.9"
     maas.opendatahub.io/provider: "vertex"
 spec:
-  credentialRef: {name: vertex-api-key, namespace: llm}
-  modelRef: {name: gemini-flash, kind: ExternalModel, provider: vertex, endpoint: 3.150.113.9}
+  modelRef: {kind: ExternalModel, name: gemini-flash}
 EOF
-
-oc apply -f /tmp/external-models.yaml
 
 # Wait for reconciler
 sleep 5
 oc get maasmodelref -n llm
+oc get externalmodel -n llm
 
 # --- Simulator Services (manual) ---
 for name in openai anthropic azure-openai vertex; do
@@ -571,12 +651,39 @@ curl -sk -w "\nHTTP_CODE:%{http_code}\n" "$HOST/claude-sonnet/v1/chat/completion
 
 ## Supported Providers
 
-| Provider | `spec.modelRef.provider` | API Translation |
-|----------|--------------------------|-----------------|
+| Provider | `spec.provider` | API Translation |
+|----------|-----------------|-----------------|
 | OpenAI | `openai` | Passthrough (native format) |
 | Anthropic | `anthropic` | OpenAI → Anthropic Messages API |
 | Azure OpenAI | `azure-openai` | OpenAI → Azure deployment format |
 | Vertex AI | `vertex` | OpenAI → Gemini format |
+
+## CRD Model (after PR #586)
+
+External models use two CRDs:
+
+```yaml
+# ExternalModel — provider config (provider, endpoint, credentials)
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: ExternalModel
+metadata:
+  name: claude-sonnet
+spec:
+  provider: anthropic
+  endpoint: api.anthropic.com
+  credentialRef:
+    name: anthropic-api-key
+
+# MaaSModelRef — references the ExternalModel by name
+apiVersion: maas.opendatahub.io/v1alpha1
+kind: MaaSModelRef
+metadata:
+  name: claude-sonnet
+spec:
+  modelRef:
+    kind: ExternalModel
+    name: claude-sonnet    # references the ExternalModel CR above
+```
 
 ## What the Reconciler Creates (automatic)
 
@@ -613,7 +720,7 @@ Without the `maas-model-*` HTTPRoute:
 
 ```
 Request body → body-field-to-header (extract model → X-Gateway-Model-Name)
-             → provider-resolver (MaaSModelRef → provider + creds in CycleState)
+             → provider-resolver (MaaSModelRef → ExternalModel CR → provider + creds in CycleState)
              → api-translation (OpenAI → provider-native format)
              → apikey-injection (inject provider API key from Secret)
 ```
