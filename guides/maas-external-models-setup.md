@@ -8,7 +8,7 @@ external model support with BBR (Body-Based Router) payload processing plugins.
 - MaaS deployed on RHOAI/OCP — see the [MaaS deployment guide](https://github.com/opendatahub-io/models-as-a-service/blob/main/docs/README.md) and [`deploy.sh`](https://github.com/opendatahub-io/models-as-a-service/blob/main/scripts/deploy.sh)
 - Kuadrant + Authorino + Limitador running
 - At least one internal model (LLMInferenceService) deployed
-- An external AI simulator or real provider endpoint
+- An external AI simulator or real provider endpoint (see [llm-katan](https://github.com/yossiovadia/llm-katan) by @yossiovadia — a drop-in test server that supports OpenAI, Anthropic, Bedrock, and Vertex APIs with real inference, no API keys or GPU needed)
 
 ## Overview
 
@@ -176,7 +176,8 @@ EOF
 
 ## Step 4 — Create the ServiceEntry for External Simulator
 
-If using the llm-katan echo simulator:
+If using the [llm-katan](https://github.com/yossiovadia/llm-katan) echo
+simulator (credit: [Yossi Ovadia](https://github.com/yossiovadia)):
 
 ```bash
 oc apply -f - <<'EOF'
