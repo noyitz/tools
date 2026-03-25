@@ -21,7 +21,6 @@ Before building, ensure these PRs are merged or included in your branches:
 | [#571](https://github.com/opendatahub-io/models-as-a-service/pull/571) | ExternalModel CRD fields | Merged | Adds provider, endpoint, credentialRef to MaaSModelRef |
 | [#582](https://github.com/opendatahub-io/models-as-a-service/pull/582) | ExternalModel Istio reconciler | Open | Auto-creates Istio egress resources |
 | [#586](https://github.com/opendatahub-io/models-as-a-service/pull/586) | Refactor into ExternalModel CRD | Merged | Separate ExternalModel CR with provider config |
-| [#616](https://github.com/opendatahub-io/models-as-a-service/pull/616) | Fix auth subscription field | Open | Fixes 403 caused by removed apiKeyValidation.subscription |
 
 ### ai-gateway-payload-processing
 
@@ -747,7 +746,7 @@ without it, the Wasm plugin can't match the request and auth is bypassed.
 1. **Auth bypass without model in URL**: Sending `POST /v1/chat/completions`
    (no model in path) bypasses auth because the Wasm plugin runs before BBR
    sets the `X-Gateway-Model-Name` header. Always include the model in the
-   URL path until this is resolved.
+   URL path until this is resolved. See [issue #617](https://github.com/opendatahub-io/models-as-a-service/issues/617).
 
 2. **Reconciler gaps (PR #582)**: The reconciler needs to also create the
    `maas-model-*` HTTPRoute and backend service in the model namespace.
@@ -757,3 +756,46 @@ without it, the Wasm plugin can't match the request and auth is bypassed.
    match the MaaSModelRef name. If vLLM registers as `facebook/opt-125m` but
    the MaaSModelRef is `facebook-opt-125m-simulated`, the model server returns
    404. Add `--served-model-name <maas-name>` to the vLLM args.
+
+4. **x-maas-\* headers leak to external providers**: Internal metadata headers
+   (username, groups, subscription, key ID) are forwarded to external providers.
+   See [issue #54](https://github.com/opendatahub-io/ai-gateway-payload-processing/issues/54).
+
+## Troubleshooting
+
+### All inference requests return 403 with valid API key
+
+**Symptom**: Fresh API key returns 403 on all models. Authorino logs show:
+```
+"cannot fetch metadata" ... "reason":"no such key: subscription"
+```
+
+**Cause**: The postgres database has stale state — API keys were created before
+a DB schema migration, and the `subscription` field is missing from the key
+record.
+
+**Fix**: Restart the postgres and maas-api pods to re-apply the DB schema and
+clear stale state. Then create a new API key.
+
+```bash
+# Delete pods (they will be recreated by their deployments)
+oc delete pod -n redhat-ods-applications \
+  $(oc get pods -n redhat-ods-applications | grep postgres | awk '{print $1}')
+oc delete pod -n redhat-ods-applications \
+  $(oc get pods -n redhat-ods-applications | grep maas-api | awk '{print $1}')
+
+# Wait for recovery
+sleep 20
+oc get pods -n redhat-ods-applications | grep -E "maas-api|postgres"
+
+# Delete and regenerate auth policies
+oc delete authpolicy -n llm --all
+
+# Create a new API key (old keys may be invalid)
+TOKEN=$(oc whoami -t)
+API_KEY=$(curl -sSk -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"new-key","expiresIn":"2h"}' \
+  "$HOST/maas-api/v1/api-keys" | jq -r '.key')
+```
