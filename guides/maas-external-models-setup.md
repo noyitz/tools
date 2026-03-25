@@ -174,40 +174,12 @@ spec:
 EOF
 ```
 
-## Step 4 — Create the ServiceEntry for External Simulator
-
-If using the [llm-katan](https://github.com/yossiovadia/llm-katan) echo
-simulator (credit: [Yossi Ovadia](https://github.com/yossiovadia)):
-
-```bash
-oc apply -f - <<'EOF'
-apiVersion: networking.istio.io/v1
-kind: ServiceEntry
-metadata:
-  name: egress-ai-simulator
-  namespace: llm
-spec:
-  hosts:
-  - ai-simulator.external
-  location: MESH_EXTERNAL
-  ports:
-  - number: 8000
-    name: http
-    protocol: HTTP
-  resolution: STATIC
-  endpoints:
-  - address: 3.150.113.9
-    ports:
-      http: 8000
-EOF
-```
-
-## Step 5 — Add External Models
+## Step 4 — Add External Models
 
 For each external model, create: Secret → MaaSModelRef → simulator Service →
 maas-model HTTPRoute → add to auth policy + subscription.
 
-### 5a. Create the Secret
+### 4a. Create the Secret
 
 ```bash
 oc create secret generic <provider>-api-key \
@@ -217,7 +189,7 @@ oc label secret <provider>-api-key -n llm \
   inference.networking.k8s.io/bbr-managed=true
 ```
 
-### 5b. Create the MaaSModelRef
+### 4b. Create the MaaSModelRef
 
 ```bash
 oc apply -f - <<'EOF'
@@ -249,7 +221,7 @@ oc get maasmodelref <model-name> -n llm
 # Should show PHASE: Ready
 ```
 
-### 5c. Create Simulator Service (manual — until reconciler is updated)
+### 4c. Create Simulator Service (manual — until reconciler is updated)
 
 The `maas-model-*` HTTPRoute needs a backend service in the model namespace:
 
@@ -262,14 +234,14 @@ metadata:
   namespace: llm
 spec:
   type: ExternalName
-  externalName: ai-simulator.external
+  externalName: 3.150.113.9
   ports:
   - port: 8000
     protocol: TCP
 EOF
 ```
 
-### 5d. Create maas-model HTTPRoute (manual — until reconciler is updated)
+### 4d. Create maas-model HTTPRoute (manual — until reconciler is updated)
 
 This HTTPRoute needs **both** match rules:
 - **Path-based**: So the Kuadrant Wasm plugin can enforce auth + rate limiting
@@ -313,7 +285,7 @@ spec:
 EOF
 ```
 
-### 5e. Add to Auth Policy and Subscription
+### 4e. Add to Auth Policy and Subscription
 
 ```bash
 # Add to MaaSAuthPolicy (include ALL existing models)
@@ -348,7 +320,7 @@ oc get maasauthpolicy external-models-access \
 # Should show: Active
 ```
 
-## Step 6 — Complete Example: All 4 Providers
+## Step 5 — Complete Example: All 4 Providers
 
 ```bash
 # --- Secrets ---
@@ -431,7 +403,7 @@ metadata:
   namespace: llm
 spec:
   type: ExternalName
-  externalName: ai-simulator.external
+  externalName: 3.150.113.9
   ports:
   - port: 8000
     protocol: TCP
@@ -511,7 +483,7 @@ spec:
 EOF
 ```
 
-## Step 7 — Test
+## Step 6 — Test
 
 ```bash
 HOST="https://<your-gateway-host>"
