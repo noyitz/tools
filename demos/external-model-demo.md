@@ -13,7 +13,8 @@ the BBR (Body-Based Router) pipeline.
 ## Environment
 
 ```bash
-HOST="https://maas.apps.ocp.4fnz2.sandbox2228.opentlc.com"
+# Set to your MaaS gateway URL
+HOST="https://maas.apps.<your-cluster-domain>"
 ```
 
 ---
@@ -45,7 +46,7 @@ metadata:
   name: claude-sonnet
   namespace: llm
   annotations:
-    maas.opendatahub.io/endpoint: "3.150.113.9"
+    maas.opendatahub.io/endpoint: "<simulator-ip>"
     maas.opendatahub.io/provider: "anthropic"
 spec:
   credentialRef:
@@ -55,7 +56,7 @@ spec:
     name: claude-sonnet
     kind: ExternalModel
     provider: anthropic
-    endpoint: 3.150.113.9
+    endpoint: <simulator-ip>
 EOF
 
 oc apply -f /tmp/claude-sonnet.yaml
