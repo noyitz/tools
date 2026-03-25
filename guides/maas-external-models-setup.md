@@ -94,7 +94,40 @@ args:
   - --plugin=apikey-injection:default
 ```
 
-## Step 3 — Create the BBR EnvoyFilter
+## Step 3 — Create the Simulator ServiceEntry
+
+If using the [llm-katan](https://github.com/yossiovadia/llm-katan) echo
+simulator (credit: [Yossi Ovadia](https://github.com/yossiovadia)), register
+it in the mesh so ExternalName services can resolve it:
+
+```bash
+oc apply -f - <<'EOF'
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: egress-ai-simulator
+  namespace: llm
+spec:
+  hosts:
+  - ai-simulator.external
+  location: MESH_EXTERNAL
+  ports:
+  - number: 8000
+    name: http
+    protocol: HTTP
+  resolution: STATIC
+  endpoints:
+  - address: <simulator-ip>
+    ports:
+      http: 8000
+EOF
+```
+
+> **Note**: This is needed because ExternalName services require a hostname,
+> not an IP address. The ServiceEntry maps `ai-simulator.external` to the
+> simulator IP in the Istio mesh.
+
+## Step 4 — Create the BBR EnvoyFilter
 
 The EnvoyFilter wires BBR as an ext_proc filter in the Envoy proxy.
 
@@ -174,12 +207,12 @@ spec:
 EOF
 ```
 
-## Step 4 — Add External Models
+## Step 5 — Add External Models
 
 For each external model, create: Secret → MaaSModelRef → simulator Service →
 maas-model HTTPRoute → add to auth policy + subscription.
 
-### 4a. Create the Secret
+### 5a. Create the Secret
 
 ```bash
 oc create secret generic <provider>-api-key \
@@ -189,7 +222,7 @@ oc label secret <provider>-api-key -n llm \
   inference.networking.k8s.io/bbr-managed=true
 ```
 
-### 4b. Create the MaaSModelRef
+### 5b. Create the MaaSModelRef
 
 ```bash
 oc apply -f - <<'EOF'
@@ -221,7 +254,7 @@ oc get maasmodelref <model-name> -n llm
 # Should show PHASE: Ready
 ```
 
-### 4c. Create Simulator Service (manual — until reconciler is updated)
+### 5c. Create Simulator Service (manual — until reconciler is updated)
 
 The `maas-model-*` HTTPRoute needs a backend service in the model namespace:
 
@@ -234,14 +267,14 @@ metadata:
   namespace: llm
 spec:
   type: ExternalName
-  externalName: 3.150.113.9
+  externalName: ai-simulator.external
   ports:
   - port: 8000
     protocol: TCP
 EOF
 ```
 
-### 4d. Create maas-model HTTPRoute (manual — until reconciler is updated)
+### 5d. Create maas-model HTTPRoute (manual — until reconciler is updated)
 
 This HTTPRoute needs **both** match rules:
 - **Path-based**: So the Kuadrant Wasm plugin can enforce auth + rate limiting
@@ -285,7 +318,7 @@ spec:
 EOF
 ```
 
-### 4e. Add to Auth Policy and Subscription
+### 5e. Add to Auth Policy and Subscription
 
 ```bash
 # Add to MaaSAuthPolicy (include ALL existing models)
@@ -320,7 +353,7 @@ oc get maasauthpolicy external-models-access \
 # Should show: Active
 ```
 
-## Step 5 — Complete Example: All 4 Providers
+## Step 6 — Complete Example: All 4 Providers
 
 ```bash
 # --- Secrets ---
@@ -403,7 +436,7 @@ metadata:
   namespace: llm
 spec:
   type: ExternalName
-  externalName: 3.150.113.9
+  externalName: ai-simulator.external
   ports:
   - port: 8000
     protocol: TCP
@@ -483,7 +516,7 @@ spec:
 EOF
 ```
 
-## Step 6 — Test
+## Step 7 — Test
 
 ```bash
 HOST="https://<your-gateway-host>"
