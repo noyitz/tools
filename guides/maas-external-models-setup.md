@@ -352,16 +352,16 @@ oc get maasauthpolicy external-models-access \
 
 ```bash
 # --- Secrets ---
-oc create secret generic openai-api-key -n llm --from-literal=api-key=demo-key
+oc create secret generic openai-api-key -n llm --from-literal=api-key=sk-openai-demo-1234
 oc label secret openai-api-key -n llm inference.networking.k8s.io/bbr-managed=true
 
-oc create secret generic anthropic-api-key -n llm --from-literal=api-key=demo-key
+oc create secret generic anthropic-api-key -n llm --from-literal=api-key=sk-ant-demo-5678
 oc label secret anthropic-api-key -n llm inference.networking.k8s.io/bbr-managed=true
 
-oc create secret generic azure-openai-api-key -n llm --from-literal=api-key=demo-key
+oc create secret generic azure-openai-api-key -n llm --from-literal=api-key=az-openai-demo-9012
 oc label secret azure-openai-api-key -n llm inference.networking.k8s.io/bbr-managed=true
 
-oc create secret generic vertex-api-key -n llm --from-literal=api-key=demo-key
+oc create secret generic vertex-api-key -n llm --from-literal=api-key=vtx-demo-3456
 oc label secret vertex-api-key -n llm inference.networking.k8s.io/bbr-managed=true
 
 # --- MaaSModelRefs ---
