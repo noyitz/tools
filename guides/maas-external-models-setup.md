@@ -27,7 +27,9 @@ Before building, ensure these PRs are merged or included in your branches:
 | PR | Title | Status | Purpose |
 |----|-------|--------|---------|
 | [#47](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/47) | apikey-injection skip for internal models | Open | Fixes BBR crash on internal models |
+| [#48](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/48) | AWS Bedrock basic support | Merged | Bedrock OpenAI translator + Bearer token auth |
 | [#52](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/52) | ExternalModel CRD support | Open | provider-resolver reads from ExternalModel CR |
+| [#65](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/65) | AWS SigV4 signing plugin | Open | Production-grade Bedrock auth with IAM credentials |
 
 ## Overview
 
@@ -650,12 +652,13 @@ curl -sk -w "\nHTTP_CODE:%{http_code}\n" "$HOST/claude-sonnet/v1/chat/completion
 
 ## Supported Providers
 
-| Provider | `spec.provider` | API Translation |
-|----------|-----------------|-----------------|
-| OpenAI | `openai` | Passthrough (native format) |
-| Anthropic | `anthropic` | OpenAI → Anthropic Messages API |
-| Azure OpenAI | `azure-openai` | OpenAI → Azure deployment format |
-| Vertex AI | `vertex` | OpenAI → Gemini format |
+| Provider | `spec.provider` | API Translation | Auth |
+|----------|-----------------|-----------------|------|
+| OpenAI | `openai` | Path rewrite to `/v1/chat/completions` | Bearer token |
+| Anthropic | `anthropic` | OpenAI → Anthropic Messages API | x-api-key |
+| Azure OpenAI | `azure-openai` | OpenAI → Azure deployment format | api-key header |
+| Vertex AI | `vertex` | OpenAI → Gemini format | Bearer token |
+| AWS Bedrock | `bedrock-openai` | Path rewrite to `/v1/chat/completions` | AWS SigV4 signing |
 
 ## CRD Model (after PR #586)
 
