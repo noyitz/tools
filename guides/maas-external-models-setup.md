@@ -305,29 +305,30 @@ oc get httproute maas-model-<model-name> -n llm
 oc get svc maas-model-<model-name>-backend -n llm
 ```
 
-### 5d. Patch for Simulator Testing (optional)
+### 5d. Patch DestinationRule for Simulator (optional)
 
-The reconciler creates the backend service pointing to the real provider
-endpoint on port 443 (TLS). If using the [llm-katan](https://github.com/yossiovadia/llm-katan)
-simulator instead, patch the backend service and HTTPRoute:
+The simulator uses a self-signed TLS certificate. The reconciler creates the
+DestinationRule with `tls.mode: SIMPLE` which verifies the certificate. For
+the simulator, add `insecureSkipVerify`:
 
 ```bash
-# Patch backend service to use simulator
-oc patch svc maas-model-<model-name>-backend -n llm --type=merge -p '{
+oc patch destinationrule <provider>-<ip>-destinationrule -n openshift-ingress \
+  --type=merge -p '{
   "spec": {
-    "externalName": "ai-simulator.external",
-    "ports": [{"port": 8000, "protocol": "TCP", "targetPort": 8000}]
+    "trafficPolicy": {
+      "tls": {
+        "mode": "SIMPLE",
+        "insecureSkipVerify": true
+      }
+    }
   }
 }'
-
-# Patch HTTPRoute to use port 8000 and remove Host header modifier
-oc patch httproute maas-model-<model-name> -n llm --type=json -p '[
-  {"op": "replace", "path": "/spec/rules/0/backendRefs/0/port", "value": 8000},
-  {"op": "replace", "path": "/spec/rules/1/backendRefs/0/port", "value": 8000},
-  {"op": "remove", "path": "/spec/rules/0/filters/1"},
-  {"op": "remove", "path": "/spec/rules/1/filters/1"}
-]'
 ```
+
+> **Note**: This is only needed for the simulator's self-signed cert. Real
+> providers (api.openai.com, api.anthropic.com, etc.) have valid certs and
+> don't need this patch. No other patching is needed — the backend service
+> and HTTPRoute work as-is on port 443.
 
 ### 5e. Add to Auth Policy and Subscription
 
@@ -716,10 +717,10 @@ without it, the Wasm plugin can't match the request and auth is bypassed.
    sets the `X-Gateway-Model-Name` header. Always include the model in the
    URL path until this is resolved. See [issue #617](https://github.com/opendatahub-io/models-as-a-service/issues/617).
 
-2. **Simulator requires manual patching**: The reconciler creates backend
-   services pointing to port 443 (TLS for real providers). For simulator
-   testing, patch the backend service and HTTPRoute to use port 8000 and
-   `ai-simulator.external` hostname. See Step 5d.
+2. **Simulator self-signed cert**: The simulator uses a self-signed TLS
+   certificate on port 443. Patch the DestinationRule with
+   `insecureSkipVerify: true` for simulator testing. See Step 5d. Not
+   needed for real providers with valid certs.
 
 3. **Internal model name matching**: The KServe `--served-model-name` must
    match the MaaSModelRef name. If vLLM registers as `facebook/opt-125m` but
