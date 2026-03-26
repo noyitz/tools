@@ -330,6 +330,12 @@ oc patch destinationrule <provider>-<ip>-destinationrule -n openshift-ingress \
 > don't need this patch. No other patching is needed — the backend service
 > and HTTPRoute work as-is on port 443.
 
+> **Warning**: The reconciler overwrites the DestinationRule on each
+> reconciliation, which removes the `insecureSkipVerify` patch. If the
+> model is re-reconciled (e.g., after controller restart or MaaSModelRef
+> update), you need to re-apply this patch. For real providers this is not
+> an issue since they have valid certs.
+
 ### 5e. Add to Auth Policy and Subscription
 
 ```bash
