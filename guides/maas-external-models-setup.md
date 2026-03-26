@@ -292,76 +292,44 @@ EOF
 > **Note**: The annotations are used by the Istio reconciler (PR #582) until
 > it is updated to read from the ExternalModel CR directly.
 
-The reconciler auto-creates Service, ServiceEntry, DestinationRule, and
-HTTPRoute in `openshift-ingress`. Verify with:
+The reconciler (PR #582) auto-creates all resources:
+- In `openshift-ingress`: Service, ServiceEntry, DestinationRule, HTTPRoute (egress)
+- In model namespace (`llm`): backend Service, `maas-model-*` HTTPRoute (with
+  both path-based and header-based match rules)
+
+Verify with:
 
 ```bash
 oc get maasmodelref <model-name> -n llm
+oc get httproute maas-model-<model-name> -n llm
+oc get svc maas-model-<model-name>-backend -n llm
 ```
 
-### 5d. Create Simulator Service (manual — until reconciler is updated)
+### 5d. Patch for Simulator Testing (optional)
+
+The reconciler creates the backend service pointing to the real provider
+endpoint on port 443 (TLS). If using the [llm-katan](https://github.com/yossiovadia/llm-katan)
+simulator instead, patch the backend service and HTTPRoute:
 
 ```bash
-oc apply -f - <<'EOF'
-apiVersion: v1
-kind: Service
-metadata:
-  name: <provider>-simulator
-  namespace: llm
-spec:
-  type: ExternalName
-  externalName: ai-simulator.external
-  ports:
-  - port: 8000
-    protocol: TCP
-EOF
+# Patch backend service to use simulator
+oc patch svc maas-model-<model-name>-backend -n llm --type=merge -p '{
+  "spec": {
+    "externalName": "ai-simulator.external",
+    "ports": [{"port": 8000, "protocol": "TCP", "targetPort": 8000}]
+  }
+}'
+
+# Patch HTTPRoute to use port 8000 and remove Host header modifier
+oc patch httproute maas-model-<model-name> -n llm --type=json -p '[
+  {"op": "replace", "path": "/spec/rules/0/backendRefs/0/port", "value": 8000},
+  {"op": "replace", "path": "/spec/rules/1/backendRefs/0/port", "value": 8000},
+  {"op": "remove", "path": "/spec/rules/0/filters/1"},
+  {"op": "remove", "path": "/spec/rules/1/filters/1"}
+]'
 ```
 
-### 5e. Create maas-model HTTPRoute (manual — until reconciler is updated)
-
-This HTTPRoute needs **both** match rules:
-- **Path-based**: So the Kuadrant Wasm plugin can enforce auth + rate limiting
-  (the Wasm plugin runs before BBR in the Envoy filter chain)
-- **Header-based**: For BBR's ClearRouteCache routing after setting
-  `X-Gateway-Model-Name`
-
-```bash
-oc apply -f - <<'EOF'
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: maas-model-<model-name>
-  namespace: llm
-spec:
-  parentRefs:
-  - name: maas-default-gateway
-    namespace: openshift-ingress
-  rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /<model-name>
-    backendRefs:
-    - name: <provider>-simulator
-      port: 8000
-    filters:
-    - type: URLRewrite
-      urlRewrite:
-        path:
-          replacePrefixMatch: /
-          type: ReplacePrefixMatch
-  - matches:
-    - headers:
-      - name: X-Gateway-Model-Name
-        type: Exact
-        value: <model-name>
-    backendRefs:
-    - name: <provider>-simulator
-      port: 8000
-EOF
-```
-
-### 5f. Add to Auth Policy and Subscription
+### 5e. Add to Auth Policy and Subscription
 
 ```bash
 # Add to MaaSAuthPolicy (include ALL existing models)
@@ -690,7 +658,9 @@ spec:
 ## What the Reconciler Creates (automatic)
 
 When you create a MaaSModelRef with `kind: ExternalModel`, the reconciler
-(PR #582) automatically creates in `openshift-ingress`:
+(PR #582) automatically creates:
+
+**In `openshift-ingress` (gateway namespace):**
 
 | Resource | Name Pattern | Purpose |
 |----------|-------------|---------|
@@ -699,22 +669,17 @@ When you create a MaaSModelRef with `kind: ExternalModel`, the reconciler
 | DestinationRule | `<provider>-<ip>-destinationrule` | TLS origination |
 | HTTPRoute | `<provider>-<ip>-httproute` | Routes `/external/<provider>/` path |
 
-Cleanup is automatic via finalizer when the MaaSModelRef is deleted.
-
-## What You Create Manually (until reconciler is updated)
-
-These resources are needed in the **model namespace** (`llm`) but the
-reconciler doesn't create them yet (see PR #582 comments):
+**In model namespace (`llm`):**
 
 | Resource | Name Pattern | Purpose |
 |----------|-------------|---------|
-| Service (ExternalName) | `<provider>-simulator` | Backend ref for the maas-model HTTPRoute |
+| Service (ExternalName) | `maas-model-<model>-backend` | Backend ref for maas-model HTTPRoute |
 | HTTPRoute | `maas-model-<model-name>` | Path match (auth) + header match (BBR routing) |
 
-Without the `maas-model-*` HTTPRoute:
-- MaaSAuthPolicy fails to resolve the route → no auth enforcement
-- MaaSSubscription fails to create TRLP → no rate limiting
-- Inference via `/<model-name>/v1/chat/completions` returns 404
+Cleanup is automatic via finalizer when the MaaSModelRef is deleted.
+
+> **Note**: For simulator testing, the backend service and HTTPRoute need to be
+> patched to use port 8000 and the simulator hostname. See Step 5d above.
 
 ## Architecture Notes
 
@@ -751,9 +716,10 @@ without it, the Wasm plugin can't match the request and auth is bypassed.
    sets the `X-Gateway-Model-Name` header. Always include the model in the
    URL path until this is resolved. See [issue #617](https://github.com/opendatahub-io/models-as-a-service/issues/617).
 
-2. **Reconciler gaps (PR #582)**: The reconciler needs to also create the
-   `maas-model-*` HTTPRoute and backend service in the model namespace.
-   See inline comments on the PR.
+2. **Simulator requires manual patching**: The reconciler creates backend
+   services pointing to port 443 (TLS for real providers). For simulator
+   testing, patch the backend service and HTTPRoute to use port 8000 and
+   `ai-simulator.external` hostname. See Step 5d.
 
 3. **Internal model name matching**: The KServe `--served-model-name` must
    match the MaaSModelRef name. If vLLM registers as `facebook/opt-125m` but
