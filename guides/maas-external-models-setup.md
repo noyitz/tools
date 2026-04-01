@@ -161,17 +161,29 @@ EOF
 
 ## Step 4 — Create the BBR EnvoyFilter
 
+> **CRITICAL:** The EnvoyFilter MUST include `workloadSelector` to scope BBR to 
+> `maas-default-gateway` only. Without it, BBR will apply to ALL gateways including
+> `data-science-gateway`, causing the dashboard to break with HTTP 500 errors when
+> BBR tries to parse CSS/JS files as inference requests.
+
+> **IMPORTANT:** Use `oc create` (NOT `oc apply`) due to a validation webhook bug
+> that strips `workloadSelector` when using `oc apply`.
+
 ```bash
-oc apply -f - <<'EOF'
+oc create -f - <<'EOF'
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
   name: bbr-ext-proc
   namespace: openshift-ingress
 spec:
+  workloadSelector:
+    labels:
+      gateway.networking.k8s.io/gateway-name: maas-default-gateway
   configPatches:
   - applyTo: HTTP_FILTER
     match:
+      context: GATEWAY
       listener:
         filterChain:
           filter:
@@ -194,6 +206,14 @@ spec:
             response_header_mode: SEND
             request_body_mode: BUFFERED
             response_body_mode: BUFFERED
+EOF
+```
+
+To update the EnvoyFilter later:
+```bash
+oc delete envoyfilter bbr-ext-proc -n openshift-ingress
+oc create -f - <<'EOF'
+# ... (same YAML as above)
 EOF
 ```
 
